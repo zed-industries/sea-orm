@@ -14,7 +14,7 @@ pub use sea_orm::{QueryFilter, ConnectionTrait};
 pub async fn transaction() {
     let ctx = TestContext::new("transaction_test").await;
 
-    ctx.db.transaction::<_, (), DbErr>(|txn| Box::pin(async move {
+    ctx.db.transaction::<_, _, DbErr>(|txn| Box::pin(async move {
         let _ = bakery::ActiveModel {
             name: Set("SeaSide Bakery".to_owned()),
             profit_margin: Set(10.4),

@@ -1,6 +1,6 @@
-use crate::{ActiveModelTrait, DbBackend, ConnectionTrait, EntityTrait, Insert, PrimaryKeyTrait, Statement, TryFromU64, error::*};
+use crate::{ActiveModelTrait, ConnectionTrait, EntityTrait, Insert, PrimaryKeyTrait, Statement, TryFromU64, error::*};
 use sea_query::InsertStatement;
-use std::{future::Future, marker::PhantomData};
+use std::marker::PhantomData;
 
 #[derive(Clone, Debug)]
 pub struct Inserter<A>
@@ -24,19 +24,19 @@ where
     A: ActiveModelTrait,
 {
     #[allow(unused_mut)]
-    pub fn exec<'a, C>(
+    pub async fn exec<'a, C>(
         self,
         db: &'a C,
-    ) -> impl Future<Output = Result<InsertResult<A>, DbErr>> + 'a
+    ) -> Result<InsertResult<A>, DbErr>
     where
-        C: ConnectionTrait,
+        C: ConnectionTrait<'a>,
         A: 'a,
     {
         // TODO: extract primary key's value from query
         // so that self is dropped before entering await
         let mut query = self.query;
         #[cfg(feature = "sqlx-postgres")]
-        if db.get_database_backend() == DbBackend::Postgres && !db.is_mock_connection() {
+        if db.get_database_backend() == crate::DbBackend::Postgres && !db.is_mock_connection() {
             use crate::{sea_query::Query, Iterable};
             if <A::Entity as EntityTrait>::PrimaryKey::iter().count() > 0 {
                 query.returning(
@@ -46,7 +46,7 @@ where
                 );
             }
         }
-        Inserter::<A>::new(query).exec(db)
+        Inserter::<A>::new(query).exec(db).await
         // TODO: return primary key if extracted before, otherwise use InsertResult
     }
 }
@@ -62,33 +62,33 @@ where
         }
     }
 
-    pub fn exec<'a, C>(
+    pub async fn exec<'a, C>(
         self,
         db: &'a C,
-    ) -> impl Future<Output = Result<InsertResult<A>, DbErr>> + 'a
+    ) -> Result<InsertResult<A>, DbErr>
     where
-        C: ConnectionTrait,
+        C: ConnectionTrait<'a>,
         A: 'a,
     {
         let builder = db.get_database_backend();
-        exec_insert(builder.build(&self.query), db)
+        exec_insert(builder.build(&self.query), db).await
     }
 }
 
 // Only Statement impl Send
-async fn exec_insert<A, C>(
+async fn exec_insert<'a, A, C>(
     statement: Statement,
     db: &C,
 ) -> Result<InsertResult<A>, DbErr>
 where
-    C: ConnectionTrait,
+    C: ConnectionTrait<'a>,
     A: ActiveModelTrait,
 {
     type PrimaryKey<A> = <<A as ActiveModelTrait>::Entity as EntityTrait>::PrimaryKey;
     type ValueTypeOf<A> = <PrimaryKey<A> as PrimaryKeyTrait>::ValueType;
     let last_insert_id = match db.get_database_backend() {
         #[cfg(feature = "sqlx-postgres")]
-        DbBackend::Postgres if !db.is_mock_connection() => {
+        crate::DbBackend::Postgres if !db.is_mock_connection() => {
             use crate::{sea_query::Iden, Iterable};
             let cols = PrimaryKey::<A>::iter()
                 .map(|col| col.to_string())
