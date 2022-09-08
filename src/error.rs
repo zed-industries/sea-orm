@@ -17,6 +17,10 @@ pub enum DbErr {
     Json(String),
     /// A migration error
     Migration(String),
+    /// None of the records are being inserted into the database,
+    /// if you insert with upcert expression that means
+    /// all of them conflict with existing records in the database
+    RecordNotInserted(String),
 }
 
 impl std::error::Error for DbErr {}
@@ -32,6 +36,7 @@ impl std::fmt::Display for DbErr {
             Self::Type(s) => write!(f, "Type Error: {}", s),
             Self::Json(s) => write!(f, "Json Error: {}", s),
             Self::Migration(s) => write!(f, "Migration Error: {}", s),
+            Self::RecordNotInserted(s) => write!(f, "RecordNotInserted Error: {}", s),
         }
     }
 }
