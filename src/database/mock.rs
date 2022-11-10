@@ -349,7 +349,7 @@ impl OpenTransaction {
 mod tests {
     use crate::{
         entity::*, tests_cfg::*, DbBackend, DbErr, IntoMockRow, MockDatabase, Statement,
-        Transaction, TransactionError, TransactionTrait,
+        Transaction, TransactionError, TransactionTrait, ConnectionTrait, StreamTrait
     };
     use pretty_assertions::assert_eq;
 
@@ -605,11 +605,31 @@ mod tests {
 
         Ok(())
     }
+    async fn do_stream<S: futures::Stream<Item = Result<fruit::Model, DbErr>> + Send + Unpin>(stream: &mut S) -> Result<(), DbErr> {
+        use futures::TryStreamExt;
+        let item = stream.try_next().await?;
+        Ok(())
+    }
+
+    async fn do_transaction_inner<'a, C>(txn: &'a C) -> Result<(), DbErr>
+        where C: ConnectionTrait + StreamTrait<'a> {
+        let mut stream = fruit::Entity::find().stream(txn).await?;
+        do_stream(&mut stream).await?;
+        do_stream(&mut stream).await?;
+        Ok(())
+    }
+
+    async fn do_transaction<C>(db: &C) -> Result<(), DbErr>
+        where C: ConnectionTrait + TransactionTrait {
+        let txn = db.begin().await?;
+        do_transaction_inner(&txn).await?;
+        do_transaction_inner(&txn).await?;
+        txn.commit().await?;
+        Ok(())
+    }
 
     #[smol_potat::test]
     async fn test_stream_in_transaction() -> Result<(), DbErr> {
-        use futures::TryStreamExt;
-
         let apple = fruit::Model {
             id: 1,
             name: "Apple".to_owned(),
@@ -626,19 +646,8 @@ mod tests {
             .append_query_results(vec![vec![apple.clone(), orange.clone()]])
             .into_connection();
 
-        let txn = db.begin().await?;
-
-        if let Ok(mut stream) = fruit::Entity::find().stream(&txn).await {
-            assert_eq!(stream.try_next().await?, Some(apple));
-
-            assert_eq!(stream.try_next().await?, Some(orange));
-
-            assert_eq!(stream.try_next().await?, None);
-
-            // stream will be dropped end of scope
-        }
-
-        txn.commit().await?;
+        do_transaction(&db).await?;
+        do_transaction(&db).await?;
 
         Ok(())
     }
